@@ -2,9 +2,9 @@
 
 A multi-agent AI assistant for logistics teams, built with **Google ADK** and **Gemini**. It comes with a web
 dashboard and a chat panel. Ask questions in plain English about stock, suppliers, reorders and demand. The
+agents answer from a real database through tools, so they do not invent numbers.
 
 **Live demo:** https://supplychain.velarisintelligence.in/
-agents answer from a real database through tools, so they do not invent numbers.
 
 ## Run it with Docker (recommended)
 
