@@ -1,0 +1,1199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Supply Chain Copilot</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 29 9.5v13L16 30 3 22.5v-13z' fill='none' stroke='%2322d3ee' stroke-width='2.5'/><circle cx='16' cy='16' r='4' fill='%23a78bfa'/></svg>">
+<script src="/static/vendor/chart.umd.min.js"></script>
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #060a12;
+    --panel: #0d1424;          /* chart surface - categorical palette validated against it */
+    --panel-hi: #121b30;
+    --border: rgba(120, 170, 255, 0.14);
+    --grid: #1c2740;
+    --axis: #2a3754;
+    --text: #e6edf8;
+    --text-2: #a7b3c9;
+    --muted: #7a879e;
+    --cyan: #22d3ee;
+    --violet: #a78bfa;
+    --s1: #3987e5;             /* categorical slot 1 (dark step) */
+    --s2: #d95926;             /* categorical slot 2 (dark step) */
+    --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+    --up: #0ca30c; --down: #e66767;
+    --mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { scroll-behavior: smooth; }
+  section[id] { scroll-margin-top: 16px; }
+  .nav { display: flex; gap: 4px; padding: 4px; border-radius: 12px; border: 1px solid var(--border); background: rgba(13, 20, 36, 0.75); }
+  .nav a { color: var(--text-2); text-decoration: none; font: 12px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; padding: 6px 12px; border-radius: 8px; }
+  .nav a:hover, .nav a.active { color: var(--text); background: rgba(34, 211, 238, 0.12); box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.45); }
+  .section-title { display: flex; align-items: baseline; gap: 12px; margin: 28px 2px 0; }
+  .section-title h2 { margin: 0; font: 600 13px var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--text); }
+  .section-title p { margin: 0; color: var(--muted); font-size: 12px; }
+  .section-title::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(34, 211, 238, 0.4), transparent); }
+  html, body { margin: 0; }
+  body {
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--text);
+    min-height: 100vh;
+    background:
+      radial-gradient(1100px 520px at 8% -12%, rgba(34, 211, 238, 0.11), transparent 60%),
+      radial-gradient(900px 480px at 100% -6%, rgba(167, 139, 250, 0.11), transparent 60%),
+      var(--bg);
+  }
+  body::before {               /* HUD grid */
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+      linear-gradient(rgba(120, 170, 255, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120, 170, 255, 0.035) 1px, transparent 1px);
+    background-size: 44px 44px;
+    -webkit-mask-image: linear-gradient(to bottom, #000, transparent 80%);
+    mask-image: linear-gradient(to bottom, #000, transparent 80%);
+  }
+  .wrap { position: relative; z-index: 1; max-width: 1440px; margin: 0 auto; padding: 0 24px 48px; }
+
+  /* ---------- header ---------- */
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 18px 0 16px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 38px; height: 38px; filter: drop-shadow(0 0 10px rgba(34, 211, 238, 0.55)); }
+  .brand h1 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; }
+  .brand h1 span { background: linear-gradient(90deg, var(--cyan), var(--violet)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .brand p { margin: 2px 0 0; color: var(--muted); font: 11px/1.4 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+  .status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border);
+          background: rgba(13, 20, 36, 0.75); color: var(--text-2); font: 12px var(--mono); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: var(--good); box-shadow: 0 0 10px var(--good); }
+  .dot.off { background: var(--critical); box-shadow: 0 0 10px var(--critical); }
+
+  /* ---------- agent command bar ---------- */
+  .command { margin-top: 4px; }
+  .cmd { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 18px; border-radius: 16px;
+         border: 1px solid transparent;
+         background: linear-gradient(var(--panel-hi), var(--panel-hi)) padding-box,
+                     linear-gradient(90deg, rgba(34, 211, 238, 0.8), rgba(167, 139, 250, 0.8)) border-box;
+         animation: glow 6s ease-in-out infinite; }
+  @keyframes glow {
+    0%, 100% { box-shadow: 0 0 26px rgba(34, 211, 238, 0.16), inset 0 0 18px rgba(34, 211, 238, 0.05); }
+    50% { box-shadow: 0 0 38px rgba(167, 139, 250, 0.24), inset 0 0 18px rgba(167, 139, 250, 0.06); }
+  }
+  .cmd-icon { width: 22px; height: 22px; flex: none; color: var(--cyan); }
+  .cmd input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: 17px/1.4 inherit; font-family: inherit; padding: 12px 0; }
+  .cmd input::placeholder { color: var(--muted); }
+  .kbd { font: 11px var(--mono); color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; }
+  .run { border: 0; cursor: pointer; border-radius: 11px; padding: 12px 20px; font: 600 14px/1 inherit; font-family: inherit; color: #04111a;
+         background: linear-gradient(90deg, var(--cyan), var(--violet)); white-space: nowrap; }
+  .run:hover:not(:disabled) { filter: brightness(1.1); }
+  .run:disabled { opacity: 0.55; cursor: progress; }
+  .agents-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin: 12px 2px 0; }
+  .pipeline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font: 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+  .node { padding: 5px 10px; border-radius: 8px; border: 1px solid var(--border); color: var(--muted); background: rgba(13, 20, 36, 0.7); transition: all 0.3s; }
+  .node.used { color: var(--text); border-color: rgba(34, 211, 238, 0.7); box-shadow: 0 0 14px rgba(34, 211, 238, 0.3); }
+  .link { width: 26px; height: 1px; background: linear-gradient(90deg, var(--cyan), var(--violet)); opacity: 0.6; }
+  .pipeline.busy .node { animation: pulse 1.6s ease-in-out infinite; }
+  .pipeline.busy .node:nth-child(3) { animation-delay: 0.2s; }
+  .pipeline.busy .node:nth-child(4) { animation-delay: 0.4s; }
+  .pipeline.busy .node:nth-child(5) { animation-delay: 0.6s; }
+  @keyframes pulse { 0%, 100% { border-color: var(--border); color: var(--muted); }
+                     50% { border-color: rgba(34, 211, 238, 0.85); color: var(--text); box-shadow: 0 0 14px rgba(34, 211, 238, 0.35); } }
+  .suggest { display: flex; flex-wrap: wrap; gap: 8px; }
+  .suggest button { border-radius: 999px; }
+
+  .banner { margin-top: 12px; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(250, 178, 25, 0.35); background: rgba(250, 178, 25, 0.08); color: #f6cf7a; font-size: 13px; }
+  .console { margin-top: 14px; border: 1px solid var(--border); border-radius: 14px; background: rgba(13, 20, 36, 0.92); }
+  .console-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border);
+                  font: 11px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  .msgs { max-height: 560px; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { padding: 10px 14px; border-radius: 12px; max-width: 100%; overflow-x: auto; }
+  .msg.user { align-self: flex-end; background: rgba(57, 135, 229, 0.16); border: 1px solid rgba(57, 135, 229, 0.35); }
+  .msg.user .prompt { color: var(--cyan); font-family: var(--mono); margin-right: 8px; }
+  .msg.bot { background: var(--panel-hi); border: 1px solid var(--border); }
+  .msg.pending { display: flex; align-items: center; gap: 12px; color: var(--text-2); }
+  .msg.err { border-color: rgba(208, 59, 59, 0.6); color: #f19a9a; }
+  .msg.note { align-self: center; background: rgba(12, 163, 12, 0.12); border: 1px solid rgba(12, 163, 12, 0.4); color: #8fe08f; font-size: 13px; }
+  .scan { width: 64px; height: 4px; border-radius: 2px; flex: none; background: linear-gradient(90deg, transparent, var(--cyan), var(--violet), transparent);
+          background-size: 200% 100%; animation: scan 1.2s linear infinite; }
+  @keyframes scan { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  .md p { margin: 0 0 8px; } .md p:last-child { margin-bottom: 0; }
+  .md ul, .md ol { margin: 4px 0 8px; padding-left: 20px; }
+  .md { line-height: 1.55; font-size: 14px; overflow-wrap: anywhere; }
+  .md h1, .md h2, .md h3, .md h4 { margin: 14px 0 6px; line-height: 1.3; color: var(--text); }
+  .md h1 { font-size: 17px; } .md h2 { font-size: 15.5px; } .md h3, .md h4 { font-size: 14px; color: var(--cyan); }
+  .md > :first-child { margin-top: 0; }
+  .md strong { color: #fff; font-weight: 600; }
+  .md li { margin: 3px 0; } .md li > p { margin: 0; }
+  .md hr { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
+  .md blockquote { margin: 8px 0; padding: 6px 12px; border-left: 3px solid var(--cyan); background: rgba(34, 211, 238, 0.06); border-radius: 0 8px 8px 0; }
+  .md pre { background: rgba(0, 0, 0, 0.35); padding: 10px 12px; border-radius: 8px; overflow-x: auto; }
+  .md pre code { background: none; padding: 0; }
+  .md table { display: block; width: max-content; max-width: 100%; overflow-x: auto; margin: 10px 0; border: 1px solid var(--border); border-radius: 8px; border-collapse: separate; border-spacing: 0; }
+  .md th, .md td { padding: 7px 12px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  .md th { background: rgba(120, 170, 255, 0.08); color: var(--text-2); }
+  .md tbody tr:nth-child(even) td { background: rgba(255, 255, 255, 0.025); }
+  .md tr:last-child td { border-bottom: 0; }
+  .md code { font-family: var(--mono); font-size: 12px; background: rgba(120, 170, 255, 0.1); padding: 1px 5px; border-radius: 4px; }
+  /* ---------- agent roster ---------- */
+  .roster { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 12px 14px 0; }
+  .agent { text-align: left; cursor: pointer; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); background: rgba(18, 27, 48, 0.7);
+           color: var(--text); font: inherit; transition: border-color 0.25s, box-shadow 0.25s; }
+  .agent:hover, .agent.open { border-color: rgba(34, 211, 238, 0.55); }
+  .agent-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .agent-name { font-weight: 600; font-size: 13px; }
+  .agent-role { margin-top: 3px; color: var(--muted); font-size: 11.5px; line-height: 1.35; }
+  .pill { font: 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+  .agent.working { border-color: rgba(34, 211, 238, 0.85); box-shadow: 0 0 16px rgba(34, 211, 238, 0.28); }
+  .agent.working .pill { color: var(--cyan); border-color: rgba(34, 211, 238, 0.6); animation: pulse 1.4s ease-in-out infinite; }
+  .agent.done .pill { color: #8fe08f; border-color: rgba(12, 163, 12, 0.5); }
+  .roster-detail { margin: 10px 14px 0; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: rgba(18, 27, 48, 0.55); font-size: 13px; }
+  .roster-detail h3 { margin: 0 0 4px; font-size: 13px; }
+  .roster-detail .lbl { margin: 10px 0 6px; color: var(--muted); font: 10px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+  .roster-detail .tools { display: flex; flex-wrap: wrap; gap: 6px; }
+  .roster-detail .tools code { font: 11px var(--mono); padding: 2px 8px; border-radius: 6px; background: rgba(120, 170, 255, 0.1); color: var(--text-2); }
+  .tries { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tries button, .follow button, .approve-inline { font-family: inherit; font-size: 12px; cursor: pointer; border-radius: 999px; padding: 5px 11px;
+                  border: 1px solid var(--border); background: rgba(18, 27, 48, 0.9); color: var(--text-2); }
+  .tries button:hover, .follow button:hover { color: var(--text); border-color: rgba(34, 211, 238, 0.6); }
+
+  /* ---------- live trace ---------- */
+  .tracebox { margin-top: 10px; border: 1px solid var(--border); border-radius: 10px; background: rgba(6, 10, 18, 0.45); }
+  .tracebox summary { cursor: pointer; padding: 7px 12px; font: 11px var(--mono); letter-spacing: 0.06em; color: var(--text-2); }
+  .trace { padding: 2px 12px 10px; display: flex; flex-direction: column; gap: 8px; }
+  .step { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; animation: slide 0.25s ease-out; }
+  @keyframes slide { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .ico { width: 16px; height: 16px; flex: none; margin-top: 2px; border-radius: 50%; border: 2px solid var(--muted); display: grid; place-items: center; font-size: 10px; line-height: 1; }
+  .step.run .ico { border-color: var(--cyan) transparent var(--violet) transparent; animation: spin 0.9s linear infinite; }
+  .step.ok .ico { border-color: var(--good); color: var(--good); }
+  .step.ok .ico::after { content: "✓"; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .step .req { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+  .step .time { color: var(--muted); font: 11px var(--mono); margin-left: 6px; }
+  .calls { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+  .calls li { font: 11.5px var(--mono); color: var(--text-2); animation: slide 0.25s ease-out; }
+  .calls li::before { content: "↳ "; color: var(--cyan); }
+  .calls li i { color: var(--muted); font-style: normal; }
+  .follow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+  .follow .lbl { color: var(--muted); font: 10px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+  .approve-inline { color: #04111a; border: 0; font-weight: 600; background: linear-gradient(90deg, var(--cyan), var(--violet)); }
+  .approve-inline:disabled { opacity: 0.5; cursor: default; }
+  .msg.welcome { background: var(--panel-hi); border: 1px solid var(--border); color: var(--text-2); }
+  .msg.welcome b { color: var(--text); }
+  @media (max-width: 900px) { .roster { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; font: 11px var(--mono); color: var(--muted); }
+
+  /* ---------- KPI tiles ---------- */
+  .kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; margin-top: 14px; }
+  .kpi, .card { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 30px rgba(0, 0, 0, 0.35); }
+  .kpi::before, .card::before { content: ""; position: absolute; left: 16px; right: 16px; top: -1px; height: 1px;
+                                background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.55), rgba(167, 139, 250, 0.55), transparent); }
+  .kpi { padding: 14px 16px; }
+  .kpi-label { color: var(--muted); font-size: 12px; }
+  .kpi-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: 4px; }
+  .kpi-value { font-size: 28px; font-weight: 650; line-height: 1.15; }
+  .kpi-sub { margin-top: 6px; color: var(--text-2); font-size: 12px; }
+  .spark { width: 96px; height: 30px; flex: none; }
+  .delta { font-weight: 600; }
+  .delta.up { color: var(--up); } .delta.down { color: var(--down); }
+  .delta .vs { color: var(--muted); font-weight: 400; }
+
+  /* ---------- cards & grid ---------- */
+  .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+  .c4 { grid-column: span 4; } .c5 { grid-column: span 5; } .c7 { grid-column: span 7; } .c8 { grid-column: span 8; }
+  .stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .card { padding: 16px 18px; min-width: 0; }
+  .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+  .card h2 { margin: 0; font-size: 14px; font-weight: 600; }
+  .card-head p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+  .chart-box { position: relative; }
+  .h280 { height: 280px; } .h240 { height: 240px; }
+
+  button.ghost, .suggest button, td button { font: 12px inherit; font-family: inherit; cursor: pointer; border-radius: 8px; padding: 5px 11px; white-space: nowrap;
+                                             border: 1px solid var(--border); background: rgba(18, 27, 48, 0.9); color: var(--text-2); }
+  button.ghost:hover, .suggest button:hover, td button:hover:not(:disabled) { color: var(--text); border-color: rgba(34, 211, 238, 0.6); box-shadow: 0 0 12px rgba(34, 211, 238, 0.2); }
+  td button.approve { color: #04111a; border: 0; font-weight: 600; background: linear-gradient(90deg, var(--cyan), var(--violet)); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  .cmd input:focus-visible { outline: none; }
+  .cmd:focus-within { animation: none; box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.7), 0 0 42px rgba(34, 211, 238, 0.28); }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+  tbody tr:hover td { background: rgba(120, 170, 255, 0.04); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .mono { font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; border: 1px solid; }
+  .badge.critical { color: #f19a9a; border-color: rgba(208, 59, 59, 0.5); background: rgba(208, 59, 59, 0.12); }
+  .badge.warning { color: #f6cf7a; border-color: rgba(250, 178, 25, 0.45); background: rgba(250, 178, 25, 0.1); }
+  .badge.good { color: #8fe08f; border-color: rgba(12, 163, 12, 0.5); background: rgba(12, 163, 12, 0.12); }
+  .badge.info { color: #a9cbff; border-color: rgba(57, 135, 229, 0.5); background: rgba(57, 135, 229, 0.12); }
+  .muted { color: var(--muted); font-size: 12px; }
+
+  /* ---------- capacity meters ---------- */
+  .meters { display: flex; flex-direction: column; gap: 18px; }
+  .meter-top { display: flex; justify-content: space-between; font-size: 13px; }
+  .meter-top .num { color: var(--text); font-weight: 600; }
+  .track { height: 8px; border-radius: 4px; margin: 7px 0 5px; background: rgba(57, 135, 229, 0.18); overflow: hidden; }
+  .track span { display: block; height: 100%; border-radius: 4px; background: var(--s1); box-shadow: 0 0 12px rgba(57, 135, 229, 0.55); }
+  .track.warning { background: rgba(250, 178, 25, 0.18); } .track.warning span { background: var(--warning); }
+  .track.critical { background: rgba(208, 59, 59, 0.18); } .track.critical span { background: var(--critical); }
+  .meter-sub { color: var(--muted); font-size: 12px; }
+
+  /* ---------- app shell: collapsible sidebar + pages ---------- */
+  .app { position: relative; z-index: 1; display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 100vh; transition: grid-template-columns 0.25s ease; }
+  .app.collapsed { grid-template-columns: 76px minmax(0, 1fr); }
+  .sidebar { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 22px; padding: 18px 14px; overflow: hidden;
+             border-right: 1px solid var(--border); background: linear-gradient(180deg, rgba(10, 16, 30, 0.96), rgba(6, 10, 18, 0.96)); }
+  .side-brand { display: flex; align-items: center; gap: 12px; padding: 2px 4px; min-width: 0; }
+  .side-title { font-size: 14px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; }
+  .side-title span { background: linear-gradient(90deg, var(--cyan), var(--violet)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .side-tag { color: var(--muted); font: 10px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+  .side-section { color: var(--muted); font: 10px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; padding: 0 12px; margin-bottom: -14px; white-space: nowrap; }
+  .side-nav { display: flex; flex-direction: column; gap: 4px; }
+  .side-nav a, .side-link, .collapse { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; color: var(--text-2); width: 100%;
+             text-decoration: none; white-space: nowrap; font: 14px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; border: 0; background: transparent; cursor: pointer; text-align: left; }
+  .side-nav a svg, .side-link svg, .collapse svg { width: 20px; height: 20px; flex: none; }
+  .side-nav a:hover, .side-link:hover, .collapse:hover { color: var(--text); background: rgba(120, 170, 255, 0.07); }
+  .side-nav a.active { color: var(--text); background: linear-gradient(90deg, rgba(34, 211, 238, 0.16), rgba(167, 139, 250, 0.06)); box-shadow: inset 2px 0 0 var(--cyan); }
+  .side-nav a.active svg { color: var(--cyan); filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.6)); }
+  .count { margin-left: auto; font: 600 11px var(--mono); font-style: normal; padding: 1px 7px; border-radius: 999px; color: #04111a; background: linear-gradient(90deg, var(--cyan), var(--violet)); }
+  .side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border); padding-top: 12px; }
+  .side-status { display: flex; align-items: center; gap: 12px; padding: 10px 12px; color: var(--text-2); font: 12px var(--mono); white-space: nowrap; }
+  .side-status .dot { margin: 0 6px; flex: none; }
+  .collapse svg { transition: transform 0.25s; }
+  .app.collapsed .side-label, .app.collapsed .side-text, .app.collapsed .count, .app.collapsed .side-section { display: none; }
+  .app.collapsed .side-nav a, .app.collapsed .side-link, .app.collapsed .collapse, .app.collapsed .side-status { justify-content: center; padding-left: 0; padding-right: 0; }
+  .app.collapsed .side-brand { justify-content: center; }
+  .app.collapsed .collapse svg { transform: rotate(180deg); }
+  .main { min-width: 0; padding: 18px 28px 48px; }
+  .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 26px 2px 0; }
+  .page-head h1 { margin: 0; font-size: 22px; font-weight: 650; }
+  .page-head p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  .console.collapsed .roster, .console.collapsed .roster-detail, .console.collapsed .msgs { display: none; }
+  .console.collapsed .console-head { border-bottom: 0; }
+  .console-actions { display: flex; align-items: center; gap: 8px; }
+  .select { font: 13px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--text); background: var(--panel-hi); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; max-width: 260px; }
+  .demand-stats { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-top: 12px; font-size: 13px; color: var(--text-2); }
+  .demand-stats b { color: var(--text); font-weight: 600; }
+  .flow-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; counter-reset: step; }
+  .flow-steps li { display: flex; gap: 12px; align-items: flex-start; font-size: 13px; color: var(--text-2); }
+  .flow-steps li::before { counter-increment: step; content: counter(step); flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+                           font: 600 12px var(--mono); color: #04111a; background: linear-gradient(135deg, var(--cyan), var(--violet)); }
+  .flow-steps b { color: var(--text); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 13px; margin: 0; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--text); }
+  .c6 { grid-column: span 6; } .c12 { grid-column: span 12; }
+  @media (max-width: 760px) {
+    .app, .app.collapsed { grid-template-columns: 64px minmax(0, 1fr); }
+    .side-label, .side-text, .count, .side-section, .collapse { display: none !important; }
+    .side-nav a, .side-link, .side-status { justify-content: center; padding-left: 0; padding-right: 0; }
+    .main { padding: 14px 16px 40px; }
+    .c6 { grid-column: span 12; }
+  }
+  @media (max-width: 1180px) {
+    .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .c4, .c5 { grid-column: span 6; } .c7, .c8 { grid-column: span 12; }
+  }
+  @media (max-width: 760px) {
+    .wrap { padding: 0 16px 40px; }
+    .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .c4, .c5, .c7, .c8 { grid-column: span 12; }
+    .kbd { display: none; }
+    .run { padding: 12px 14px; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="sidebar" aria-label="Main navigation">
+    <div class="side-brand">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+        <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/></linearGradient></defs>
+        <path d="M16 2 29 9.5v13L16 30 3 22.5v-13z" fill="none" stroke="url(#lg)" stroke-width="2"/>
+        <path d="M16 9v14M9.5 12.5 16 16l6.5-3.5" fill="none" stroke="url(#lg)" stroke-width="1.6" stroke-linecap="round"/>
+        <circle cx="16" cy="16" r="2.6" fill="#22d3ee"/>
+      </svg>
+      <div class="side-text"><div class="side-title">Supply Chain <span>Copilot</span></div><div class="side-tag">AI operations console</div></div>
+    </div>
+    <div class="side-section">Pages</div>
+    <nav class="side-nav" aria-label="Pages">
+      <a href="/dashboard" data-page="dashboard" title="Dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span class="side-label">Dashboard</span></a>
+      <a href="/inventory" data-page="inventory" title="Inventory"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8l9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg><span class="side-label">Inventory</span><em class="count" id="nav-low" hidden></em></a>
+      <a href="/procurement" data-page="procurement" title="Procurement"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1z"/><path d="M8 6H6a1 1 0 0 0-1 1v13a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-2"/><path d="M9 12h6M9 16h4"/></svg><span class="side-label">Procurement</span><em class="count" id="nav-po" hidden></em></a>
+      <a href="/analytics" data-page="analytics" title="Analytics"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/></svg><span class="side-label">Analytics</span></a>
+      <a href="/agents" data-page="agents" title="AI Agents"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg><span class="side-label">AI Agents</span></a>
+    </nav>
+    <div class="side-foot">
+      <a class="side-link" href="/docs" target="_blank" rel="noopener" title="API docs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 9-4 3 4 3M16 9l4 3-4 3M14 5l-4 14"/></svg><span class="side-label">API docs</span></a>
+      <div class="side-status" title="Gemini status"><span id="llm-dot" class="dot"></span><span id="llm" class="side-label">Checking Gemini…</span></div>
+      <button type="button" class="collapse" id="collapse" aria-expanded="true" title="Collapse sidebar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg><span class="side-label">Collapse</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+  <section class="command" id="agents" aria-label="Ask the agents">
+    <form id="composer" class="cmd">
+      <svg class="cmd-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3"/>
+      </svg>
+      <input id="input" autocomplete="off" aria-label="Ask the agents" placeholder="Ask the agents — e.g. “What should we reorder at Rotterdam DC?”">
+      <span class="kbd">/</span>
+      <button id="send" class="run" type="submit">Run agents</button>
+    </form>
+    <div class="agents-row">
+      <div class="suggest" id="suggest"></div>
+    </div>
+    <div id="banner" class="banner" hidden></div>
+    <div id="console" class="console">
+      <div class="console-head"><span>Agent console</span><div class="console-actions"><button id="console-toggle" type="button" class="ghost" aria-expanded="false">Expand</button><button id="clear" type="button" class="ghost">New session</button></div></div>
+      <div class="roster" id="roster" aria-label="Agent team"></div>
+      <div id="roster-detail" class="roster-detail" hidden></div>
+      <div id="msgs" class="msgs" aria-live="polite"></div>
+    </div>
+  </section>
+
+    <div class="page-head">
+      <div><h1 id="page-title">Dashboard</h1><p id="page-sub"></p></div>
+      <span class="chip">Synced <span id="synced">--:--:--</span></span>
+    </div>
+
+    <section class="page" data-page="dashboard" aria-label="Dashboard">
+      <div class="kpis" id="kpis"></div>
+      <div class="grid">
+        <article class="card c8" data-chart="flow">
+          <div class="card-head">
+            <div><h2>Network flow</h2><p>Units per week across all warehouses · last 12 weeks</p></div>
+            <button class="ghost tbl" type="button">Table</button>
+          </div>
+          <div class="chart-box h280"><canvas id="c-flow" role="img" aria-label="Line chart of units shipped and received per week over the last 12 weeks"></canvas></div>
+          <div class="table-view" hidden></div>
+        </article>
+        <article class="card c4" data-chart="health">
+          <div class="card-head">
+            <div><h2>Stock health by warehouse</h2><p>SKU positions by status</p></div>
+            <button class="ghost tbl" type="button">Table</button>
+          </div>
+          <div class="chart-box h280"><canvas id="c-health" role="img" aria-label="Stacked bar chart of SKU positions per warehouse by stock status"></canvas></div>
+          <div class="table-view" hidden></div>
+        </article>
+        <article class="card c4" data-chart="category">
+          <div class="card-head">
+            <div><h2>Inventory value by category</h2><p>On-hand units × unit cost</p></div>
+            <button class="ghost tbl" type="button">Table</button>
+          </div>
+          <div class="chart-box h240"><canvas id="c-category" role="img" aria-label="Bar chart of inventory value by product category"></canvas></div>
+          <div class="table-view" hidden></div>
+        </article>
+        <article class="card c4" data-chart="movers">
+          <div class="card-head">
+            <div><h2>Fastest movers</h2><p>Annualised inventory turnover · last 90 days</p></div>
+            <button class="ghost tbl" type="button">Table</button>
+          </div>
+          <div class="chart-box h240"><canvas id="c-movers" role="img" aria-label="Bar chart of the fastest-moving SKUs by inventory turnover"></canvas></div>
+          <div class="table-view" hidden></div>
+        </article>
+        <article class="card c4">
+          <div class="card-head"><div><h2>Warehouse capacity</h2><p>Units on hand vs capacity</p></div></div>
+          <div class="meters"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="page" data-page="inventory" aria-label="Inventory" hidden>
+      <div class="grid">
+        <article class="card c8">
+          <div class="card-head"><div><h2>Low stock</h2><p>Every position at or below its reorder point · worst first</p></div></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>SKU</th><th>Product</th><th>Warehouse</th><th class="num">Avail / ROP</th><th>Status</th><th></th></tr></thead>
+            <tbody id="low-body"></tbody>
+          </table></div>
+        </article>
+        <article class="card c4">
+          <div class="card-head"><div><h2>Warehouse capacity</h2><p>Units on hand vs capacity</p></div></div>
+          <div class="meters"></div>
+        </article>
+        <article class="card c12">
+          <div class="card-head"><div><h2>Dead stock</h2><p>Stock with no sales in 60 days and the cash tied up in it</p></div></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Product</th><th class="num">On hand</th><th class="num">Idle</th><th class="num">Value</th><th></th></tr></thead>
+            <tbody id="dead-body"></tbody>
+          </table></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="page" data-page="procurement" aria-label="Procurement" hidden>
+      <div class="grid">
+        <article class="card c7">
+          <div class="card-head"><div><h2>Purchase orders</h2><p>Drafts need your approval before they are sent</p></div></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>PO</th><th>Supplier</th><th>To</th><th class="num">Value</th><th>Status</th><th></th></tr></thead>
+            <tbody id="po-body"></tbody>
+          </table></div>
+        </article>
+        <article class="card c5">
+          <div class="card-head"><div><h2>Suppliers</h2><p>Lead time, catalogue size and price vs unit cost</p></div></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Supplier</th><th class="num">Lead time</th><th class="num">SKUs</th><th class="num">Price vs cost</th></tr></thead>
+            <tbody id="sup-body"></tbody>
+          </table></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="page" data-page="analytics" aria-label="Analytics" hidden>
+      <div class="grid">
+        <article class="card c8" data-chart="demand">
+          <div class="card-head">
+            <div><h2>Demand explorer</h2><p>Weekly units shipped for one SKU · last 12 weeks</p></div>
+            <div class="console-actions"><select id="sku-select" class="select" aria-label="Choose a SKU"></select><button class="ghost tbl" type="button">Table</button></div>
+          </div>
+          <div class="chart-box h280"><canvas id="c-demand" role="img" aria-label="Line chart of weekly demand for the selected SKU"></canvas></div>
+          <div class="table-view" hidden></div>
+          <div class="demand-stats" id="demand-stats"></div>
+        </article>
+        <article class="card c4">
+          <div class="card-head"><div><h2>Slowest movers</h2><p>Lowest turnover · last 90 days</p></div></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Product</th><th class="num">On hand</th><th class="num">Supply</th><th class="num">Turns</th></tr></thead>
+            <tbody id="slow-body"></tbody>
+          </table></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="page" data-page="agents" aria-label="AI Agents" hidden>
+      <div class="grid">
+        <article class="card c7">
+          <div class="card-head"><div><h2>How a request flows</h2><p>Every answer is built from live database queries</p></div></div>
+          <ol class="flow-steps">
+            <li><div><b>You ask</b> in plain English in the agent bar at the top of any page.</div></li>
+            <li><div><b>The orchestrator plans</b> and hands each part of the request to the right specialist: Inventory, Procurement or Analytics.</div></li>
+            <li><div><b>Specialists call tools</b>: 13 typed functions that query the warehouse database for stock, suppliers, demand and purchase orders.</div></li>
+            <li><div><b>The orchestrator combines</b> the results into one answer and shows which agents and tools were used.</div></li>
+            <li><div><b>You stay in control</b>: agents can only draft purchase orders, and a person approves each one before it is sent.</div></li>
+          </ol>
+        </article>
+        <article class="card c5">
+          <div class="card-head"><div><h2>Configuration &amp; guardrails</h2><p>Tuned for the Gemini API free tier</p></div></div>
+          <dl class="kv">
+            <dt>Orchestrator model</dt><dd id="m-orch">–</dd>
+            <dt>Specialist model</dt><dd id="m-sub">–</dd>
+            <dt>Framework</dt><dd>Google ADK · agents as tools</dd>
+            <dt>Rate limits</dt><dd>auto-retry 429 / 5xx with backoff</dd>
+            <dt>Grounding</dt><dd>numbers only from tool results</dd>
+            <dt>Approvals</dt><dd>human sign-off on every PO</dd>
+          </dl>
+        </article>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const C = {
+  panel: css("--panel"), grid: css("--grid"), axis: css("--axis"), text: css("--text"), text2: css("--text-2"), muted: css("--muted"),
+  s1: css("--s1"), s2: css("--s2"), good: css("--good"), warning: css("--warning"), serious: css("--serious"), critical: css("--critical"),
+};
+const nf = new Intl.NumberFormat("en-US");
+const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 3 });
+const money = (v) => "$" + nf.format(Math.round(v || 0));
+const moneyCompact = (v) => "$" + compact.format(v || 0);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const alpha = (hex, a) => hex + Math.round(a * 255).toString(16).padStart(2, "0");
+const SUGGESTIONS = [
+  "Which items are stocked out right now?",
+  "What should we reorder at Rotterdam DC?",
+  "Is demand for Packing Tape rising or falling?",
+  "Show dead stock and the cash tied up in it.",
+];
+let sessionId = null;
+let busy = false;
+try { sessionId = sessionStorage.getItem("sc_session"); } catch (e) { /* storage unavailable */ }
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || `Request failed (HTTP ${res.status})`);
+  return body;
+}
+
+// ------------------------------------------------------------------ chart setup
+Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+Chart.defaults.font.size = 12;
+Chart.defaults.color = C.muted;
+Chart.defaults.borderColor = C.grid;
+Chart.defaults.maintainAspectRatio = false;
+Chart.defaults.animation.duration = 600;
+Object.assign(Chart.defaults.plugins.legend.labels, { color: C.text2, boxWidth: 10, boxHeight: 10, useBorderRadius: true, borderRadius: 2, padding: 14 });
+Object.assign(Chart.defaults.plugins.tooltip, {
+  backgroundColor: "#0a1122", borderColor: "rgba(120,170,255,0.28)", borderWidth: 1, titleColor: C.text, bodyColor: C.text2,
+  padding: 10, boxPadding: 4, cornerRadius: 8, usePointStyle: false,
+});
+const solidLegend = (chart) => Chart.defaults.plugins.legend.labels.generateLabels(chart).map((item) => {
+  const ds = chart.data.datasets[item.datasetIndex];
+  const color = ds.legendColor || ds.borderColor || ds.backgroundColor;
+  return { ...item, fillStyle: color, strokeStyle: color, lineWidth: 0 };
+});
+
+// Vertical hairline under the hovered week (line chart crosshair).
+const crosshair = {
+  id: "crosshair",
+  afterDatasetsDraw(chart) {
+    const active = chart.tooltip && chart.tooltip.getActiveElements();
+    if (!active || !active.length) return;
+    const { ctx, chartArea } = chart;
+    ctx.save();
+    ctx.strokeStyle = C.axis;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(Math.round(active[0].element.x) + 0.5, chartArea.top);
+    ctx.lineTo(Math.round(active[0].element.x) + 0.5, chartArea.bottom);
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+// Direct labels at line ends (name + latest value); skipped when they would collide.
+const endLabels = {
+  id: "endLabels",
+  afterDatasetsDraw(chart) {
+    const points = chart.data.datasets.map((ds, i) => {
+      const meta = chart.getDatasetMeta(i);
+      const el = meta.data[meta.data.length - 1];
+      return !meta.hidden && el ? { x: el.x, y: el.y, color: ds.borderColor, text: `${ds.shortLabel} ${compact.format(ds.data[ds.data.length - 1])}` } : null;
+    }).filter(Boolean);
+    for (let a = 0; a < points.length; a++) for (let b = a + 1; b < points.length; b++) if (Math.abs(points[a].y - points[b].y) < 16) return;
+    const { ctx } = chart;
+    ctx.save();
+    ctx.font = `12px ${Chart.defaults.font.family}`;
+    ctx.textBaseline = "middle";
+    points.forEach((p) => {
+      ctx.strokeStyle = p.color; ctx.lineWidth = 2; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(p.x + 10, p.y); ctx.lineTo(p.x + 20, p.y); ctx.stroke();
+      ctx.fillStyle = C.text2; ctx.fillText(p.text, p.x + 25, p.y);
+    });
+    ctx.restore();
+  },
+};
+// Value at the tip of each horizontal bar.
+const barLabels = {
+  id: "barLabels",
+  afterDatasetsDraw(chart, args, opts) {
+    if (!opts || !opts.format) return;
+    const { ctx } = chart;
+    const ds = chart.data.datasets[0];
+    ctx.save();
+    ctx.font = `12px ${Chart.defaults.font.family}`;
+    ctx.fillStyle = C.text2;
+    ctx.textBaseline = "middle";
+    chart.getDatasetMeta(0).data.forEach((bar, i) => ctx.fillText(opts.format(ds.data[i]), bar.x + 6, bar.y));
+    ctx.restore();
+  },
+};
+
+const xLinear = (fmt) => ({ beginAtZero: true, grid: { color: C.grid }, border: { display: false }, ticks: { maxTicksLimit: 5, callback: fmt } });
+const yCategory = { grid: { display: false }, border: { color: C.axis }, ticks: { color: C.text2 } };
+
+function flowConfig(f) {
+  const isLast = (c) => c.dataIndex === c.dataset.data.length - 1;
+  const line = (label, shortLabel, data, color, fill) => ({
+    label, shortLabel, data, borderColor: color, backgroundColor: fill ? alpha(color, 0.1) : color, fill: fill ? "origin" : false,
+    borderWidth: 2, cubicInterpolationMode: "monotone", borderJoinStyle: "round", borderCapStyle: "round",
+    pointRadius: (c) => (isLast(c) ? 4 : 0), pointHoverRadius: 5, pointHitRadius: 14,
+    pointBackgroundColor: color, pointBorderColor: C.panel, pointBorderWidth: 2,
+  });
+  return {
+    type: "line",
+    data: { labels: f.labels, datasets: [
+      line("Shipped (outbound)", "Shipped", f.outbound, C.s1, true),
+      line("Received (inbound)", "Received", f.inbound, C.s2, false),
+    ] },
+    options: {
+      interaction: { mode: "index", intersect: false },
+      layout: { padding: { right: 104, top: 4 } },
+      scales: {
+        x: { grid: { display: false }, border: { color: C.axis }, ticks: { maxRotation: 0, autoSkipPadding: 14 } },
+        y: { beginAtZero: true, grid: { color: C.grid }, border: { display: false }, ticks: { maxTicksLimit: 5, callback: (v) => compact.format(v) } },
+      },
+      plugins: {
+        legend: { position: "top", align: "end", labels: { generateLabels: solidLegend } },
+        tooltip: { callbacks: { title: (items) => `Week of ${items[0].label}`, label: (c) => ` ${c.dataset.shortLabel}: ${nf.format(c.parsed.y)} units` } },
+      },
+    },
+    plugins: [crosshair, endLabels],
+  };
+}
+
+function healthConfig(rows) {
+  const series = [
+    ["stockout", "Stockout", C.critical],
+    ["low", "Below reorder point", C.warning],
+    ["healthy", "Healthy", C.good],
+    ["excess", "Excess (>90 days cover)", C.serious],
+  ];
+  return {
+    type: "bar",
+    data: {
+      labels: rows.map((r) => r.warehouse),
+      datasets: series.map(([key, label, color]) => ({
+        label, data: rows.map((r) => r[key]), backgroundColor: color,
+        borderColor: C.panel, borderWidth: 1, borderSkipped: false, maxBarThickness: 24,   // 2px surface gap between segments
+      })),
+    },
+    options: {
+      indexAxis: "y",
+      scales: { x: { ...xLinear((v) => v), stacked: true }, y: { ...yCategory, stacked: true } },
+      plugins: {
+        legend: { position: "bottom", align: "start" },
+        tooltip: { mode: "index", intersect: false, callbacks: { label: (c) => ` ${c.dataset.label}: ${c.parsed.x} positions` } },
+      },
+    },
+  };
+}
+
+function hbarConfig(labels, values, meta, fmt, tooltipLabel, label) {
+  return {
+    type: "bar",
+    data: { labels, datasets: [{
+      label, data: values, meta, backgroundColor: C.s1, maxBarThickness: 22, borderSkipped: false,
+      borderRadius: { topLeft: 0, bottomLeft: 0, topRight: 4, bottomRight: 4 },
+    }] },
+    options: {
+      indexAxis: "y",
+      layout: { padding: { right: 58 } },
+      scales: { x: xLinear(fmt), y: yCategory },
+      plugins: { legend: { display: false }, barLabels: { format: fmt }, tooltip: { callbacks: { label: tooltipLabel } } },
+    },
+    plugins: [barLabels],
+  };
+}
+
+const charts = {};
+function upsert(key, canvasId, config) {
+  if (charts[key]) {
+    charts[key].data = config.data;
+    charts[key].update();
+  } else {
+    charts[key] = new Chart($(canvasId), config);
+  }
+  const card = document.querySelector(`.card[data-chart="${key}"]`);
+  const view = card.querySelector(".table-view");
+  if (!view.hidden) view.innerHTML = chartTable(charts[key]);
+}
+
+function chartTable(chart) {
+  const ds = chart.data.datasets;
+  const head = `<thead><tr><th></th>${ds.map((d) => `<th class="num">${esc(d.label)}</th>`).join("")}</tr></thead>`;
+  const body = chart.data.labels.map((label, i) =>
+    `<tr><td>${esc(label)}</td>${ds.map((d) => `<td class="num">${nf.format(Math.round(d.data[i] * 100) / 100)}</td>`).join("")}</tr>`).join("");
+  return `<div class="table-wrap"><table>${head}<tbody>${body}</tbody></table></div>`;
+}
+
+document.querySelectorAll(".card[data-chart] .tbl").forEach((btn) => btn.addEventListener("click", () => {
+  const card = btn.closest(".card");
+  const chart = charts[card.dataset.chart];
+  if (!chart) return;
+  const view = card.querySelector(".table-view");
+  const box = card.querySelector(".chart-box");
+  const showTable = view.hidden;
+  if (showTable) view.innerHTML = chartTable(chart);
+  view.hidden = !showTable;
+  box.hidden = showTable;
+  btn.textContent = showTable ? "Chart" : "Table";
+}));
+
+// ------------------------------------------------------------------ dashboard
+function sparkline(values) {
+  const w = 96, h = 30, max = Math.max(...values), min = Math.min(...values);
+  const pts = values.map((v, i) => [4 + (i * (w - 8)) / (values.length - 1), h - 4 - ((v - min) / (max - min || 1)) * (h - 8)]);
+  const d = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ");
+  const [lx, ly] = pts[pts.length - 1];
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${d}" fill="none" stroke="${C.muted}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>` +
+         `<circle cx="${lx}" cy="${ly}" r="3.5" fill="#22d3ee" stroke="${C.panel}" stroke-width="2"/></svg>`;
+}
+
+const tile = (label, value, sub, extra = "") =>
+  `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-row"><div class="kpi-value">${value}</div>${extra}</div><div class="kpi-sub">${sub}</div></div>`;
+
+function renderKpis(d, wh, low, pos, dead) {
+  const units = wh.warehouses.reduce((a, w) => a + w.units_on_hand, 0);
+  const value = wh.warehouses.reduce((a, w) => a + w.inventory_value, 0);
+  const chg = d.kpis.shipped_change_pct;
+  const delta = chg == null ? "&nbsp;" :
+    `<span class="delta ${chg >= 0 ? "up" : "down"}">${chg >= 0 ? "▲" : "▼"} ${Math.abs(chg)}%</span> <span class="muted">vs prior 4 wks</span>`;
+  const stockouts = low.items.filter((i) => i.stockout).length;
+  const drafts = pos.purchase_orders.filter((p) => p.status === "draft").length;
+  $("kpis").innerHTML = [
+    tile("Inventory value", moneyCompact(value), `${nf.format(units)} units on hand`),
+    tile("Units shipped · 4 wks", compact.format(d.kpis.units_shipped_4w), delta, sparkline(d.weekly_flow.outbound)),
+    tile("Low-stock positions", low.count, `<span class="badge critical">⛔ ${stockouts} stockouts</span>`),
+    tile("Dead stock", moneyCompact(dead.total_value_tied_up), `${dead.count} SKUs idle 60+ days`),
+    tile("POs awaiting approval", drafts, `${pos.count} ${pos.count === 1 ? "order" : "orders"} in pipeline`),
+  ].join("");
+}
+
+function renderMeters(wh) {
+  const html = wh.warehouses.map((w) => {
+    const pct = w.utilization_pct;
+    const sev = pct >= 85 ? "critical" : pct >= 70 ? "warning" : "";
+    return `<div><div class="meter-top"><span>${esc(w.name)} <span class="muted">${esc(w.location)}</span></span><span class="num">${pct}%</span></div>
+      <div class="track ${sev}"><span style="width:${Math.min(100, pct)}%"></span></div>
+      <div class="meter-sub">${nf.format(w.units_on_hand)} / ${nf.format(w.capacity)} units · ${moneyCompact(w.inventory_value)}</div></div>`;
+  }).join("");
+  document.querySelectorAll(".meters").forEach((el) => { el.innerHTML = html; });
+}
+
+function renderTables(low, pos, dead) {
+  $("low-body").innerHTML = low.items.map((i) => `
+    <tr>
+      <td class="mono">${esc(i.sku)}</td><td>${esc(i.name)}</td><td>${esc(i.warehouse)}</td>
+      <td class="num">${nf.format(i.available)} / ${nf.format(i.reorder_point)}</td>
+      <td>${i.stockout ? '<span class="badge critical">⛔ Stockout</span>' : '<span class="badge warning">⚠ Low</span>'}</td>
+      <td class="num"><button type="button" data-ask="${esc(`Recommend a reorder for ${i.sku} (${i.name}) at ${i.warehouse} and draft the purchase order.`)}">Reorder</button></td>
+    </tr>`).join("") || '<tr><td colspan="6" class="muted">All positions are above their reorder point.</td></tr>';
+
+  $("po-body").innerHTML = pos.purchase_orders.map((p) => `
+    <tr>
+      <td class="mono">#${p.po_id}</td><td>${esc(p.supplier)}</td><td>${esc(p.warehouse.replace(" DC", ""))}</td>
+      <td class="num">${money(p.total_value)}</td>
+      <td>${p.status === "draft" ? '<span class="badge warning">⚠ Draft</span>' : '<span class="badge good">✓ Sent</span>'}</td>
+      <td class="num">${p.status === "draft" ? `<button type="button" class="approve" data-approve="${p.po_id}">Approve</button>` : ""}</td>
+    </tr>`).join("") || '<tr><td colspan="6" class="muted">No purchase orders yet. Ask the agents to draft one.</td></tr>';
+
+  $("dead-body").innerHTML = dead.items.map((d) => `
+    <tr>
+      <td>${esc(d.name)} <span class="mono">${esc(d.sku)}</span></td>
+      <td class="num">${nf.format(d.on_hand)}</td>
+      <td class="num">${d.days_since_last_sale != null ? d.days_since_last_sale + "d" : "never"}</td>
+      <td class="num">${moneyCompact(d.value_tied_up)}</td>
+      <td class="num"><button type="button" data-ask="${esc(`${d.sku} (${d.name}) has had no sales for ${d.days_since_last_sale ?? "many"} days. Show its demand trend and recommend what to do with the stock.`)}">Analyze</button></td>
+    </tr>`).join("") || '<tr><td colspan="5" class="muted">No dead stock.</td></tr>';
+}
+
+async function refresh() {
+  try {
+    const [d, wh, low, pos, dead, sup] = await Promise.all([
+      api("/api/dashboard"), api("/api/warehouses"), api("/api/low-stock"), api("/api/purchase-orders"), api("/api/dead-stock"),
+      api("/api/suppliers"),
+    ]);
+    renderKpis(d, wh, low, pos, dead);
+    upsert("flow", "c-flow", flowConfig(d.weekly_flow));
+    upsert("health", "c-health", healthConfig(d.stock_health));
+    upsert("category", "c-category", hbarConfig(
+      d.categories.map((c) => c.category), d.categories.map((c) => c.inventory_value), d.categories, moneyCompact,
+      (c) => ` ${money(c.parsed.x)} · ${nf.format(c.dataset.meta[c.dataIndex].units_on_hand)} units`, "Inventory value ($)"));
+    upsert("movers", "c-movers", hbarConfig(
+      d.top_movers.map((m) => m.name), d.top_movers.map((m) => m.annual_turnover), d.top_movers, (v) => `${v.toFixed(1)}×`,
+      (c) => { const m = c.dataset.meta[c.dataIndex]; return ` ${m.annual_turnover}× / yr · ${nf.format(m.units_sold)} sold · ${m.days_of_supply ?? "–"} days of supply`; },
+      "Annual turnover (×)"));
+    renderMeters(wh);
+    renderTables(low, pos, dead);
+    renderSuppliers(sup);
+    renderSlow(d.slow_movers);
+    updateBadges(low, pos);
+    $("synced").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch (e) {
+    showBanner("Could not load dashboard data: " + e.message);
+  }
+}
+
+function showBanner(text) { $("banner").textContent = text; $("banner").hidden = false; }
+
+async function loadStatus() {
+  try {
+    const s = await api("/api/status");
+    $("llm").textContent = s.llm_configured ? `Gemini online · ${s.orchestrator_model}` : "Gemini offline · add API key";
+    $("llm-dot").className = "dot " + (s.llm_configured ? "on" : "off");
+    $("m-orch").textContent = s.orchestrator_model;
+    $("m-sub").textContent = s.subagent_model;
+    if (!s.llm_configured) showBanner("Agents need a Gemini API key: put GOOGLE_API_KEY in .env (free key at aistudio.google.com/apikey), save, then refresh this page. The dashboard works without it.");
+  } catch (e) {
+    $("llm").textContent = "API unreachable";
+    $("llm-dot").className = "dot off";
+  }
+}
+
+function renderSuppliers(sup) {
+  $("sup-body").innerHTML = sup.suppliers.map((s) => `
+    <tr>
+      <td>${esc(s.name)}<div class="muted">${esc(s.contact || "")}</div></td>
+      <td class="num">${s.lead_time_days} days</td>
+      <td class="num">${s.skus_supplied}</td>
+      <td class="num">${s.price_index != null ? s.price_index.toFixed(2) + "×" : "–"}</td>
+    </tr>`).join("") || '<tr><td colspan="4" class="muted">No suppliers.</td></tr>';
+}
+
+function renderSlow(rows) {
+  $("slow-body").innerHTML = (rows || []).map((m) => `
+    <tr>
+      <td>${esc(m.name)} <span class="mono">${esc(m.sku)}</span></td>
+      <td class="num">${nf.format(m.on_hand)}</td>
+      <td class="num">${m.days_of_supply != null ? nf.format(Math.round(m.days_of_supply)) + "d" : "no sales"}</td>
+      <td class="num">${m.annual_turnover.toFixed(1)}×</td>
+    </tr>`).join("") || '<tr><td colspan="4" class="muted">No data.</td></tr>';
+}
+
+function updateBadges(low, pos) {
+  const show = (id, n) => { $(id).textContent = n; $(id).hidden = !n; };
+  show("nav-low", low.count);
+  show("nav-po", pos.purchase_orders.filter((p) => p.status === "draft").length);
+}
+
+// ------------------------------------------------------------------ analytics: demand explorer
+function demandConfig(labels, values, name) {
+  const isLast = (c) => c.dataIndex === c.dataset.data.length - 1;
+  return {
+    type: "line",
+    data: { labels, datasets: [{
+      label: `${name} · units shipped`, shortLabel: "Units", data: values, borderColor: C.s1, backgroundColor: alpha(C.s1, 0.1), fill: "origin",
+      borderWidth: 2, cubicInterpolationMode: "monotone", pointRadius: (c) => (isLast(c) ? 4 : 0), pointHoverRadius: 5, pointHitRadius: 14,
+      pointBackgroundColor: C.s1, pointBorderColor: C.panel, pointBorderWidth: 2,
+    }] },
+    options: {
+      interaction: { mode: "index", intersect: false },
+      layout: { padding: { right: 84, top: 4 } },
+      scales: {
+        x: { grid: { display: false }, border: { color: C.axis }, ticks: { maxRotation: 0, autoSkipPadding: 14 } },
+        y: { beginAtZero: true, grid: { color: C.grid }, border: { display: false }, ticks: { maxTicksLimit: 5, callback: (v) => compact.format(v) } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { title: (items) => `Week of ${items[0].label}`, label: (c) => ` ${nf.format(c.parsed.y)} units` } },
+      },
+    },
+    plugins: [crosshair, endLabels],
+  };
+}
+
+async function loadDemand(sku) {
+  try {
+    const t = await api(`/api/demand-trend?sku=${encodeURIComponent(sku)}&weeks=12`);
+    const n = t.weekly_units.length;
+    const labels = t.weekly_units.map((_, i) =>
+      new Date(Date.now() - (n - i) * 7 * 864e5).toLocaleDateString("en-US", { month: "short", day: "2-digit" }));
+    upsert("demand", "c-demand", demandConfig(labels, t.weekly_units, t.name));
+    const trend = { rising: "▲ rising", falling: "▼ falling", stable: "● stable" }[t.direction] || t.direction;
+    const change = t.change_pct != null ? `${t.change_pct > 0 ? "+" : ""}${t.change_pct}%` : "–";
+    $("demand-stats").innerHTML = `<span>Avg <b>${nf.format(t.avg_weekly_units)}</b> units / week</span>` +
+      `<span>Last 4 wks <b>${nf.format(t.last_4_weeks_avg)}</b> vs prior <b>${nf.format(t.prior_4_weeks_avg)}</b> (${change})</span>` +
+      `<span>Trend <b>${esc(trend)}</b></span>` +
+      `<button type="button" class="ghost" data-ask="${esc(`Analyze demand for ${t.sku} (${t.name}) and recommend a reorder plan.`)}">Ask the agents</button>`;
+  } catch (e) {
+    $("demand-stats").textContent = e.message;
+  }
+}
+
+async function loadSkus() {
+  try {
+    const r = await api("/api/skus");
+    const sel = $("sku-select");
+    sel.innerHTML = r.skus.map((s) => `<option value="${esc(s.id)}">${esc(s.id)} · ${esc(s.name)}</option>`).join("");
+    sel.value = r.skus.some((s) => s.id === "SKU-1015") ? "SKU-1015" : (r.skus[0] || {}).id;
+    sel.addEventListener("change", () => loadDemand(sel.value));
+    if (sel.value) loadDemand(sel.value);
+  } catch (e) {
+    $("demand-stats").textContent = "Could not load SKUs: " + e.message;
+  }
+}
+
+// ------------------------------------------------------------------ pages, sidebar, console
+const PAGES = {
+  dashboard: ["Dashboard", "Live network overview · refreshes after every agent action"],
+  inventory: ["Inventory", "Shortages, warehouse capacity and idle stock"],
+  procurement: ["Procurement", "Purchase orders awaiting approval and supplier terms"],
+  analytics: ["Analytics", "Demand trends and slow-moving stock"],
+  agents: ["AI Agents", "The multi-agent team behind the copilot"],
+};
+const pageFromPath = () => { const p = location.pathname.replace(/^\/+|\/+$/g, ""); return PAGES[p] ? p : "dashboard"; };
+const resizeCharts = () => Object.values(charts).forEach((c) => c.resize());
+
+function setConsole(open) {
+  $("console").classList.toggle("collapsed", !open);
+  $("console-toggle").textContent = open ? "Collapse" : "Expand";
+  $("console-toggle").setAttribute("aria-expanded", String(open));
+}
+
+function showPage(page, push) {
+  document.querySelectorAll(".page").forEach((s) => { s.hidden = s.dataset.page !== page; });
+  document.querySelectorAll(".side-nav a").forEach((a) => {
+    const on = a.dataset.page === page;
+    a.classList.toggle("active", on);
+    if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  });
+  $("page-title").textContent = PAGES[page][0];
+  $("page-sub").textContent = PAGES[page][1];
+  document.title = `${PAGES[page][0]} · Supply Chain Copilot`;
+  if (push) history.pushState({ page }, "", `/${page}`);
+  if (page === "agents") setConsole(true);
+  requestAnimationFrame(resizeCharts);
+}
+
+function initSidebar() {
+  const app = $("app");
+  const apply = (collapsed) => {
+    app.classList.toggle("collapsed", collapsed);
+    $("collapse").setAttribute("aria-expanded", String(!collapsed));
+    $("collapse").title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+    setTimeout(resizeCharts, 280);
+  };
+  let saved = null;
+  try { saved = localStorage.getItem("sc_sidebar"); } catch (e) { /* storage unavailable */ }
+  apply(saved === "collapsed");
+  $("collapse").addEventListener("click", () => {
+    const collapsed = !app.classList.contains("collapsed");
+    apply(collapsed);
+    try { localStorage.setItem("sc_sidebar", collapsed ? "collapsed" : "open"); } catch (e) { /* storage unavailable */ }
+  });
+  document.querySelectorAll(".side-nav a").forEach((a) => a.addEventListener("click", (e) => {
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;   // let the browser open new tabs
+    e.preventDefault();
+    showPage(a.dataset.page, true);
+    window.scrollTo({ top: 0 });
+  }));
+  window.addEventListener("popstate", () => showPage(pageFromPath(), false));
+  $("console-toggle").addEventListener("click", () => setConsole($("console").classList.contains("collapsed")));
+}
+
+// ------------------------------------------------------------------ agents
+function render(text) {
+  if (window.marked && window.DOMPurify) return DOMPurify.sanitize(marked.parse(text));
+  return esc(text).replace(/\n/g, "<br>");
+}
+
+function addMsg(kind, html) {
+  const el = document.createElement("div");
+  el.className = "msg " + kind;
+  el.innerHTML = html;
+  $("msgs").appendChild(el);
+  $("msgs").scrollTop = $("msgs").scrollHeight;
+  return el;
+}
+
+const AGENTS = {
+  orchestrator: { label: "Orchestrator", role: "Reads your request and delegates to the right specialists", tools: [],
+    tries: ["What should we reorder at Rotterdam DC, and which supplier is best?", "Give me a quick health check of the whole network."] },
+  inventory_agent: { label: "Inventory", role: "Stock levels, shortages, warehouse capacity", tools: ["search_skus", "get_stock", "list_low_stock", "list_warehouses"],
+    tries: ["Which items are stocked out right now?", "How full is each warehouse?"] },
+  procurement_agent: { label: "Procurement", role: "Suppliers, reorder sizing, purchase orders", tools: ["search_skus", "get_suppliers_for_sku", "recommend_reorder", "create_purchase_order", "submit_purchase_order", "list_purchase_orders"],
+    tries: ["Compare suppliers for Packing Tape.", "List all purchase orders and their status."] },
+  analytics_agent: { label: "Analytics", role: "Demand trends, turnover, dead stock", tools: ["search_skus", "movement_history", "demand_trend", "stock_turnover", "dead_stock"],
+    tries: ["Is demand for Packing Tape rising or falling?", "Show dead stock and the cash tied up in it."] },
+};
+const FOLLOWUPS = {
+  inventory_agent: ["Which of these should we reorder?", "Which warehouse is closest to capacity?"],
+  procurement_agent: ["Show all purchase orders and their status.", "Compare suppliers for the top shortage."],
+  analytics_agent: ["What is the fastest-moving item and how much stock is left?", "Show dead stock and the cash tied up in it."],
+};
+const agentState = {};   // name -> "idle" | "working" | "done"
+let openAgent = null;
+
+function renderRoster() {
+  $("roster").innerHTML = Object.entries(AGENTS).map(([key, a]) => {
+    const st = agentState[key] || "idle";
+    const text = { idle: "Idle", working: "Working", done: "Done" }[st];
+    return `<button type="button" class="agent ${st}${openAgent === key ? " open" : ""}" data-agent="${key}" aria-expanded="${openAgent === key}">
+      <div class="agent-top"><span class="agent-name">${esc(a.label)}</span><span class="pill">${text}</span></div>
+      <div class="agent-role">${esc(a.role)}</div></button>`;
+  }).join("");
+  const d = $("roster-detail");
+  const a = AGENTS[openAgent];
+  d.hidden = !a;
+  if (a) d.innerHTML = `<h3>${esc(a.label)} agent</h3><div>${esc(a.role)}.</div>` +
+    (a.tools.length ? `<div class="lbl">Tools it can call</div><div class="tools">${a.tools.map((t) => `<code>${t}</code>`).join("")}</div>`
+                    : `<div class="lbl">How it works</div><div>It has no data tools of its own. It calls the three specialists as tools and combines their answers.</div>`) +
+    `<div class="lbl">Try asking</div><div class="tries">${a.tries.map((t) => `<button type="button" data-ask="${esc(t)}">${esc(t)}</button>`).join("")}</div>`;
+}
+function setAgent(name, st) { agentState[name] = st; renderRoster(); }
+
+function showWelcome() {
+  $("msgs").innerHTML = "";
+  addMsg("welcome", `<b>Welcome.</b> This is a team of AI agents working on your live warehouse data. An <b>orchestrator</b> reads your question and hands parts of it to three specialists
+    (<b>Inventory</b>, <b>Procurement</b>, <b>Analytics</b>). When you ask something, you will see here which agents are working and which tools they call, in real time.
+    Click an agent above to see what it can do, or pick a suggested question.`);
+}
+
+const argText = (args) => Object.entries(args || {}).map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`).join(", ").slice(0, 90);
+
+async function send(text) {
+  text = (text ?? $("input").value).trim();
+  if (!text || busy) return;
+  busy = true;
+  $("send").disabled = true;
+  $("input").value = "";
+  openAgent = null;
+  Object.keys(AGENTS).forEach((k) => { agentState[k] = "idle"; });
+  document.querySelectorAll(".follow").forEach((f) => f.remove());
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  setConsole(true);
+  addMsg("user", `<span class="prompt">›</span>${esc(text)}`);
+  const msg = addMsg("bot", `<div class="md" hidden></div>
+    <details class="tracebox" open><summary></summary><div class="trace"></div></details>
+    <div class="meta" hidden></div><div class="after"></div>`);
+  const trace = msg.querySelector(".trace");
+  const summary = msg.querySelector("summary");
+  const started = performance.now();
+  const elapsed = () => ((performance.now() - started) / 1000).toFixed(1);
+  const steps = [];
+  const usedTools = new Set();
+  const scroll = () => { $("msgs").scrollTop = $("msgs").scrollHeight; };
+  const step = (html) => {
+    const el = document.createElement("div");
+    el.className = "step run";
+    el.innerHTML = `<span class="ico"></span><div>${html}</div>`;
+    trace.appendChild(el); steps.push(el); scroll();
+    return el;
+  };
+  const finish = (el) => { if (el) { el.classList.remove("run"); el.classList.add("ok"); } };
+  const tick = () => { summary.textContent = `Agents working… ${elapsed()}s`; };
+  tick();
+  const timer = setInterval(tick, 500);
+  setAgent("orchestrator", "working");
+  const planning = step(`<b>Orchestrator</b> is reading your request and deciding who should handle it`);
+  let composing = null;
+  const open = {};     // agent -> queue of running step elements
+
+  const handle = (ev) => {
+    if (ev.type === "session") {
+      sessionId = ev.session_id;
+      try { sessionStorage.setItem("sc_session", sessionId); } catch (e) { /* storage unavailable */ }
+    } else if (ev.type === "delegate") {
+      finish(planning);
+      const lbl = AGENTS[ev.agent]?.label || ev.agent;
+      const el = step(`<b>${esc(lbl)} agent</b> <span class="time"></span><span class="req">${esc(ev.request)}</span><ul class="calls"></ul>`);
+      el._t0 = performance.now();
+      (open[ev.agent] ||= []).push(el);
+      setAgent(ev.agent, "working");
+    } else if (ev.type === "tool") {
+      usedTools.add(ev.tool);
+      const el = (open[ev.agent] || []).slice(-1)[0];
+      if (el) el.querySelector(".calls").insertAdjacentHTML("beforeend", `<li>${esc(ev.tool)}<i>(${esc(argText(ev.args))})</i></li>`);
+      scroll();
+    } else if (ev.type === "agent_done") {
+      const el = (open[ev.agent] || []).shift();
+      if (el) { finish(el); el.querySelector(".time").textContent = ((performance.now() - el._t0) / 1000).toFixed(1) + "s"; }
+      if (!(open[ev.agent] || []).length) setAgent(ev.agent, "done");
+      composing ||= step(`<b>Orchestrator</b> is combining the results into an answer`);
+    }
+  };
+
+  try {
+    const res = await fetch("/chat/stream", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text, session_id: sessionId }),
+    });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.detail || `Request failed (HTTP ${res.status})`); }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "", final = null;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+        if (!line) continue;
+        const ev = JSON.parse(line);
+        if (ev.type === "error") throw new Error(ev.message);
+        if (ev.type === "final") final = ev; else handle(ev);
+      }
+    }
+    if (!final) throw new Error("The agent stream ended unexpectedly. Please try again.");
+    steps.forEach(finish);
+    const used = [...new Set(final.agents_called)];
+    setAgent("orchestrator", "done");
+    msg.querySelector(".md").hidden = false;
+    msg.querySelector(".md").innerHTML = render(final.reply);
+    const meta = msg.querySelector(".meta");
+    meta.hidden = false;
+    meta.innerHTML = used.map((a) => `<span class="badge info">${esc(AGENTS[a]?.label || a)}</span>`).join("") + `<span>${elapsed()}s</span>`;
+    msg.querySelector("details").open = false;
+    summary.textContent = `How the agents got this answer · ${steps.length} steps · ${elapsed()}s`;
+    refresh();
+
+    const after = msg.querySelector(".after");
+    if (usedTools.has("create_purchase_order")) {
+      try {
+        const pos = await api("/api/purchase-orders?status=draft");
+        const drafts = pos.purchase_orders.filter((p) => p.status === "draft");
+        if (drafts.length) after.insertAdjacentHTML("beforeend", `<div class="follow"><span class="lbl">Needs your approval</span>` +
+          drafts.map((p) => `<button type="button" class="approve-inline" data-approve="${p.po_id}">Approve PO #${p.po_id} · ${esc(p.supplier)} · ${money(p.total_value)}</button>`).join("") + `</div>`);
+      } catch (e) { /* approval stays available in the Purchase orders table */ }
+    }
+    const next = [...new Set(used.flatMap((a) => FOLLOWUPS[a] || []))].filter((q) => q !== text).slice(0, 3);
+    if (next.length) after.insertAdjacentHTML("beforeend", `<div class="follow"><span class="lbl">Ask next</span>` +
+      next.map((q) => `<button type="button" data-ask="${esc(q)}">${esc(q)}</button>`).join("") + `</div>`);
+  } catch (e) {
+    msg.className = "msg bot err";
+    msg.textContent = e.message;
+    Object.keys(AGENTS).forEach((k) => { agentState[k] = "idle"; });
+    renderRoster();
+  } finally {
+    clearInterval(timer);
+    busy = false;
+    $("send").disabled = false;
+    scroll();
+    $("input").focus();
+  }
+}
+
+async function approve(poId, button) {
+  button.disabled = true;
+  setConsole(true);
+  try {
+    const r = await api(`/api/purchase-orders/${poId}/submit`, { method: "POST" });
+    const po = r.purchase_order;
+    addMsg("note", `✓ PO #${po.po_id} approved and sent to ${esc(po.supplier)} — expected delivery ${esc(po.expected_delivery)}.`);
+  } catch (e) {
+    addMsg("bot err", esc(e.message));
+    button.disabled = false;
+  }
+  refresh();
+}
+
+$("suggest").innerHTML = SUGGESTIONS.map((s) => `<button type="button" data-ask="${esc(s)}">${esc(s)}</button>`).join("");
+document.addEventListener("click", (e) => {
+  const ask = e.target.closest("[data-ask]");
+  if (ask) send(ask.dataset.ask);
+  const agentBtn = e.target.closest(".agent[data-agent]");
+  if (agentBtn) { openAgent = openAgent === agentBtn.dataset.agent ? null : agentBtn.dataset.agent; renderRoster(); }
+  const approveBtn = e.target.closest("[data-approve]");
+  if (approveBtn) approve(approveBtn.dataset.approve, approveBtn);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "/" && document.activeElement !== $("input")) { e.preventDefault(); $("input").focus(); }
+});
+$("composer").addEventListener("submit", (e) => { e.preventDefault(); send(); });
+$("clear").addEventListener("click", () => {
+  sessionId = null;
+  try { sessionStorage.removeItem("sc_session"); } catch (e) { /* storage unavailable */ }
+  Object.keys(AGENTS).forEach((k) => { agentState[k] = "idle"; });
+  openAgent = null;
+  renderRoster();
+  showWelcome();
+});
+
+renderRoster();
+showWelcome();
+loadStatus();
+initSidebar();
+setConsole(false);
+showPage(pageFromPath(), false);
+refresh();
+loadSkus();
+</script>
+</body>
+</html>
